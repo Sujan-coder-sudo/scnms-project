@@ -1,0 +1,191 @@
+version: '3.8'
+
+services:
+  # Database Services
+  postgres:
+    image: postgres:15-alpine
+    container_name: scnms-postgres
+    environment:
+      POSTGRES_DB: scnms
+      POSTGRES_USER: scnms
+      POSTGRES_PASSWORD: scnms
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - scnms-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: scnms-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - scnms-network
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: scnms-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    networks:
+      - scnms-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: scnms-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./config/grafana/provisioning:/etc/grafana/provisioning
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - scnms-network
+
+  # SCNMS Microservices
+  device-discovery:
+    build:
+      context: .
+      dockerfile: services/device_discovery/Dockerfile
+    container_name: scnms-device-discovery
+    ports:
+      - "8001:8001"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - scnms-network
+
+  poller:
+    build:
+      context: .
+      dockerfile: services/poller/Dockerfile
+    container_name: scnms-poller
+    ports:
+      - "8002:8002"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LOG_LEVEL=INFO
+      - MAX_WORKERS=4
+    depends_on:
+      - postgres
+      - redis
+      - prometheus
+    networks:
+      - scnms-network
+
+  data-ingestion:
+    build:
+      context: .
+      dockerfile: services/data_ingestion/Dockerfile
+    container_name: scnms-data-ingestion
+    ports:
+      - "8003:8003"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PROMETHEUS_URL=http://prometheus:9090
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+      - prometheus
+    networks:
+      - scnms-network
+
+  alarm-manager:
+    build:
+      context: .
+      dockerfile: services/alarm_manager/Dockerfile
+    container_name: scnms-alarm-manager
+    ports:
+      - "8004:8004"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - scnms-network
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: scnms-api
+    ports:
+      - "8000:8000"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+      - device-discovery
+      - poller
+      - data-ingestion
+      - alarm-manager
+    networks:
+      - scnms-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  scnms-network:
+    driver: bridge
