@@ -180,6 +180,26 @@ services:
     networks:
       - scnms-network
 
+  # Prometheus Exporter
+  prometheus-exporter:
+    build:
+      context: .
+      dockerfile: services/Dockerfile.exporter
+    container_name: scnms-prometheus-exporter
+    ports:
+      - "9100:9100"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=scnms
+      - POSTGRES_USER=scnms
+      - POSTGRES_PASSWORD=scnms
+      - EXPORTER_PORT=9100
+    depends_on:
+      - postgres
+    networks:
+      - scnms-network
+
 volumes:
   postgres_data:
   redis_data:
